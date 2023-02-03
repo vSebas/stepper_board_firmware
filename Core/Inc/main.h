@@ -107,6 +107,7 @@ void Error_Handler(void);
 #define LVL_SFTR_OE_1_GPIO_Port GPIOD
 #define BRAKE_IN_Pin GPIO_PIN_9
 #define BRAKE_IN_GPIO_Port GPIOB
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
