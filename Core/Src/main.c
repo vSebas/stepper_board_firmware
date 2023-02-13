@@ -82,8 +82,12 @@ uint32_t TxMailbox;
 CAN_RxHeaderTypeDef RxHeader;
 CAN_TxHeaderTypeDef TxHeader;
 
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan){
+uint8_t count = 0;
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
 	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData);
+	count++;
 }
 
 /* USER CODE END 0 */
@@ -144,17 +148,31 @@ int main(void)
 	  Error_Handler();
   }
 
-  uint8_t dataT[20] = "Hello from STM32!\n\r";
-  uint8_t dataR[1] = "";
 
-  TxHeader.DLC = 2; // Length of data to send in bytes
+  if(HAL_CAN_Start(&hcan1) == HAL_OK)
+	  printf("CAN started correctly\n");
+  else
+	  printf("CAN error\n");
+
+  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+  TxHeader.DLC = 1; // Length of data to send in bytes
   TxHeader.ExtId = 0; // For basic CAN protocol
   TxHeader.IDE = CAN_ID_STD;
   TxHeader.RTR = CAN_RTR_DATA; // transfering data of remote frame
-  TxHeader.StdId = 0x446; // ID of this CAN peripheral
+  TxHeader.StdId = 0x620; // ID of this CAN peripheral
   TxHeader.TransmitGlobalTime = DISABLE;
 
-  TxData[0] = 10;
+  TxData[0] = 0x01;
+
+  if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox) == HAL_OK) {
+	  printf("Transmission requested 1\n");
+  		  if(!HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox))
+  			  printf("Message sent 1\n");
+  		  else
+  			  printf("Message pending 1\n");
+  	  } else
+  		  printf("Error 1\n");
 
 
   /* USER CODE END 2 */
@@ -175,10 +193,11 @@ int main(void)
   GPIO_PinState FAULT_1;
   GPIO_PinState FAULT_2;
 
-  HAL_UART_Transmit(&huart1, dataT, 14, HAL_MAX_DELAY);
+  //HAL_UART_Transmit(&huart1, dataT, 14, HAL_MAX_DELAY);
 
   while (1)
   {
+	  /*
 	  current_t = HAL_GetTick();
 
 	  if(current_t - previous_t >= delay){
@@ -199,7 +218,6 @@ int main(void)
 	  FAULT_1 = HAL_GPIO_ReadPin(GPIOC, STPR_FLT_1_Pin);
 	  FAULT_2 = HAL_GPIO_ReadPin(GPIOB, STPR_FLT_2_Pin);
 
-	  /*
 	  printf("ID 0: %d\n", ID_0);
 	  printf("ID 1: %d\n", ID_1);
 	  printf("ID 2: %d\n", ID_2);
@@ -208,7 +226,6 @@ int main(void)
 	  printf("BRAKE: %d\n", BRAKE);
 	  printf("FAULT 1: %d\n", FAULT_1);
 	  printf("FAULT 2: %d\n", FAULT_2);
-	  */
 
 	  HAL_ADC_Start(&hadc1);
 	  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
@@ -219,20 +236,25 @@ int main(void)
 
 	  printf("Thermistor Measurement: %u\n", thermistor_reading);
 	  printf("Thermistor Voltage: %f\n", (float) thermistor_reading*3.3/4096);
+		*/
 
 	  //if(HAL_UART_Receive(&huart1, dataR, 1, HAL_MAX_DELAY) == HAL_OK)
 	  //{
-	//	  dataR[0] = dataR[0] + 1;
-	//	  HAL_UART_Transmit(&huart1, dataR, 1, HAL_MAX_DELAY);
-	 // }
+	  // dataR[0] = dataR[0] + 1;
+	  // HAL_UART_Transmit(&huart1, dataR, 1, HAL_MAX_DELAY);
+	  // }
 
+	  if(!HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox)){
+		  //printf("Message sent 2\n");
+		  HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox);
+			  /* printf("Transmission requested 2\n");
+		  else
+			  printf("Error 2\n"); */
+	  }/*
+	  else
+		  printf("Message pending 2\n");*/
 
-	  HAL_CAN_AddTxMessage(&hcan1, &TxHeader, TxData, &TxMailbox);
-
-	  HAL_CAN_Start(&hcan1);
-
-	  // Activate notification when data is received
-	  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+	  HAL_Delay(500);
 
     /* USER CODE END WHILE */
 
@@ -365,10 +387,10 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 32;
+  hcan1.Init.Prescaler = 40;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_2TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_13TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = DISABLE;
