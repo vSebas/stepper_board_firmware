@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -48,6 +49,32 @@ TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 
+/* Definitions for canRxTask */
+osThreadId_t canRxTaskHandle;
+const osThreadAttr_t canRxTask_attributes = {
+  .name = "canRxTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for canTxTask */
+osThreadId_t canTxTaskHandle;
+const osThreadAttr_t canTxTask_attributes = {
+  .name = "canTxTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
+/* Definitions for ledTask */
+osThreadId_t ledTaskHandle;
+const osThreadAttr_t ledTask_attributes = {
+  .name = "ledTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for canRxSem */
+osSemaphoreId_t canRxSemHandle;
+const osSemaphoreAttr_t canRxSem_attributes = {
+  .name = "canRxSem"
+};
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -60,6 +87,10 @@ static void MX_TIM2_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_CAN1_Init(void);
+void can_rx_task(void *argument);
+void can_tx_task(void *argument);
+void led_task(void *argument);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -78,17 +109,21 @@ int _write(int file, char *ptr, int len)
 uint8_t TxData[8];
 uint8_t RxData[8];
 uint32_t TxMailbox;
+uint32_t FreeMailBoxes;
 
 CAN_RxHeaderTypeDef RxHeader;
 CAN_TxHeaderTypeDef TxHeader;
 
-uint8_t count = 0;
+//uint8_t count = 0;
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData);
-	count++;
+	//osSemaphoreRelease(canRxSemHandle);
+	  if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
+		  HAL_GPIO_TogglePin(GPIOA, DEBUG_2_Pin);
+	  osDelay(50);
 }
+
 
 /* USER CODE END 0 */
 
@@ -129,18 +164,19 @@ int main(void)
 
   // Debug
   HAL_GPIO_WritePin(GPIOC, DEBUG_6_Pin|DEBUG_5_Pin|DEBUG_4_Pin|DEBUG_3_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(GPIOA, DEBUG_2_Pin|DEBUG_1_Pin, GPIO_PIN_SET);
+  //HAL_GPIO_WritePin(GPIOA, DEBUG_2_Pin|DEBUG_1_Pin, GPIO_PIN_SET);
 
   // Stepper 1
-  HAL_GPIO_WritePin(LVL_SFTR_OE_1_GPIO_Port, LVL_SFTR_OE_1_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(GPIOC, STPR_DIR_1_Pin | STPR_EN_1_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(STPR_PWM_1_GPIO_Port, STPR_PWM_1_Pin, GPIO_PIN_RESET);
+  //HAL_GPIO_WritePin(LVL_SFTR_OE_1_GPIO_Port, LVL_SFTR_OE_1_Pin, GPIO_PIN_SET);
+  //HAL_GPIO_WritePin(GPIOC, STPR_DIR_1_Pin | STPR_EN_1_Pin, GPIO_PIN_SET);
+  //HAL_GPIO_WritePin(STPR_PWM_1_GPIO_Port, STPR_PWM_1_Pin, GPIO_PIN_RESET);
 
   // Stepper 2
-  HAL_GPIO_WritePin(GPIOB, LVL_SFTR_OE_2_Pin|STPR_DIR_2_Pin|STPR_PWM_2_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(GPIOB, STPR_EN_2_Pin, GPIO_PIN_SET);
+  //HAL_GPIO_WritePin(GPIOB, LVL_SFTR_OE_2_Pin|STPR_DIR_2_Pin|STPR_PWM_2_Pin, GPIO_PIN_SET);
+  //HAL_GPIO_WritePin(GPIOB, STPR_EN_2_Pin, GPIO_PIN_SET);
 
   // ADC Calibration
+  /*
   HAL_StatusTypeDef ret;
   ret = HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
   if(ret != HAL_OK)
@@ -148,7 +184,7 @@ int main(void)
 	  Error_Handler();
   }
 
-
+*/
   if(HAL_CAN_Start(&hcan1) == HAL_OK)
 	  printf("CAN started correctly\n");
   else
@@ -156,29 +192,56 @@ int main(void)
 
   HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 
-  TxHeader.DLC = 1; // Length of data to send in bytes
-  TxHeader.ExtId = 0; // For basic CAN protocol
-  TxHeader.IDE = CAN_ID_STD;
-  TxHeader.RTR = CAN_RTR_DATA; // transfering data of remote frame
-  TxHeader.StdId = 0x620; // ID of this CAN peripheral
-  TxHeader.TransmitGlobalTime = DISABLE;
-
-  TxData[0] = 0x01;
-
-  if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox) == HAL_OK) {
-	  printf("Transmission requested 1\n");
-  		  if(!HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox))
-  			  printf("Message sent 1\n");
-  		  else
-  			  printf("Message pending 1\n");
-  	  } else
-  		  printf("Error 1\n");
-
-
   /* USER CODE END 2 */
 
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* creation of canRxSem */
+  canRxSemHandle = osSemaphoreNew(1, 1, &canRxSem_attributes);
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of canRxTask */
+  //canRxTaskHandle = osThreadNew(can_rx_task, NULL, &canRxTask_attributes);
+
+  /* creation of canTxTask */
+  canTxTaskHandle = osThreadNew(can_tx_task, NULL, &canTxTask_attributes);
+
+  /* creation of ledTask */
+  ledTaskHandle = osThreadNew(led_task, NULL, &ledTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  /*
   uint32_t previous_t = 0;
   uint32_t current_t = 0;
   uint32_t delay = 1;
@@ -192,6 +255,7 @@ int main(void)
   GPIO_PinState BRAKE;
   GPIO_PinState FAULT_1;
   GPIO_PinState FAULT_2;
+  */
 
   //HAL_UART_Transmit(&huart1, dataT, 14, HAL_MAX_DELAY);
 
@@ -244,17 +308,17 @@ int main(void)
 	  // HAL_UART_Transmit(&huart1, dataR, 1, HAL_MAX_DELAY);
 	  // }
 
-	  if(!HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox)){
+	  //if(!HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox)){
 		  //printf("Message sent 2\n");
-		  HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox);
+		//  HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox);
 			  /* printf("Transmission requested 2\n");
 		  else
-			  printf("Error 2\n"); */
-	  }/*
+			  printf("Error 2\n");
+	  //}
 	  else
 		  printf("Message pending 2\n");*/
 
-	  HAL_Delay(500);
+	  //HAL_Delay(500);
 
     /* USER CODE END WHILE */
 
@@ -282,17 +346,15 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
-  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
-  RCC_OscInitStruct.MSICalibrationValue = 0;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLN = 20;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
-  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -408,10 +470,10 @@ static void MX_CAN1_Init(void)
   canfilterconfig.FilterActivation = CAN_FILTER_ENABLE;
   canfilterconfig.FilterBank = 0;		// Specify filter bank to use
   canfilterconfig.FilterFIFOAssignment = CAN_FILTER_FIFO0; //Incoming data is saved here
-  canfilterconfig.FilterIdHigh = 0x103<<5;
-  canfilterconfig.FilterIdLow = 0x0000;
-  canfilterconfig.FilterMaskIdHigh= 0x103<<5;
-  canfilterconfig.FilterMaskIdLow = 0x0000;
+  canfilterconfig.FilterIdHigh = 0;
+  canfilterconfig.FilterIdLow = 0;
+  canfilterconfig.FilterMaskIdHigh= 0;
+  canfilterconfig.FilterMaskIdLow = 0;
   canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
   canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT;
   canfilterconfig.SlaveStartFilterBank = 0;
@@ -660,6 +722,108 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_can_rx_task */
+/**
+  * @brief  Function implementing the canRxTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_can_rx_task */
+void can_rx_task(void *argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+	  //osThreadSuspend(canRxTaskHandle);
+	  osSemaphoreAcquire(canRxSemHandle, osWaitForever);
+	  if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
+		  HAL_GPIO_TogglePin(GPIOA, DEBUG_2_Pin);
+	  osDelay(50);
+  }
+  //osThreadTerminate(NULL);
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_can_tx_task */
+/**
+* @brief Function implementing the canTxTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_can_tx_task */
+void can_tx_task(void *argument)
+{
+  /* USER CODE BEGIN can_tx_task */
+  /* Infinite loop */
+  for(;;)
+  {
+	  TxHeader.DLC = 1; // Length of data to send in bytes
+		TxHeader.ExtId = 0; // For basic CAN protocol
+		TxHeader.IDE = CAN_ID_STD;
+		TxHeader.RTR = CAN_RTR_DATA; // transfering data of remote frame
+		TxHeader.StdId = 0x600; // ID of this CAN peripheral
+		TxHeader.TransmitGlobalTime = DISABLE;
+
+		TxData[0] = 0x11;
+
+		FreeMailBoxes = HAL_CAN_GetTxMailboxesFreeLevel(&hcan1);
+
+		if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox) == HAL_OK) {
+		  printf("Transmission requested 1\n");
+				  if(!HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox))
+					  printf("Message sent 1\n");
+				  else
+					  printf("Message pending 1\n");
+			  } else
+				  printf("Error 1\n");
+		osDelay(50);
+  }
+  osThreadTerminate(NULL);
+  /* USER CODE END can_tx_task */
+}
+
+/* USER CODE BEGIN Header_led_task */
+/**
+* @brief Function implementing the ledTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_led_task */
+void led_task(void *argument)
+{
+  /* USER CODE BEGIN led_task */
+  /* Infinite loop */
+  for(;;)
+  {
+	HAL_GPIO_TogglePin(GPIOA, DEBUG_1_Pin);
+	osDelay(600);
+  }
+  osThreadTerminate(NULL);
+  /* USER CODE END led_task */
+}
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM6 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM6) {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
