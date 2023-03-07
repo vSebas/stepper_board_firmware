@@ -22,7 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <math.h>
 #include "stdio.h"
+#include "stdlib.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,13 +72,33 @@ const osThreadAttr_t ledTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
+/* Definitions for steeringTaskPWM */
+osThreadId_t steeringTaskPWMHandle;
+const osThreadAttr_t steeringTaskPWM_attributes = {
+  .name = "steeringTaskPWM",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal4,
+};
+/* Definitions for periodicTimer */
+osTimerId_t periodicTimerHandle;
+const osTimerAttr_t periodicTimer_attributes = {
+  .name = "periodicTimer"
+};
 /* Definitions for canRxSem */
 osSemaphoreId_t canRxSemHandle;
 const osSemaphoreAttr_t canRxSem_attributes = {
   .name = "canRxSem"
 };
 /* USER CODE BEGIN PV */
-
+const float MAX_STEERING = 57.3; // Degrees
+const float STEP_ANGLE = 1.8; // Degrees
+const float STEPS_REV = 200;  // Steps per revolution
+int dir_1 = 1;				 //
+int goal_steps_1 = 0;		 // Required steps to reach desired angle
+int steps_1 = 0;			  // Steps of motor 1
+int current_step_1 = 0;
+float desired_angle_1 = 45; // Degrees
+float current_angle_1 = 0; // Degrees
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -90,6 +112,8 @@ static void MX_CAN1_Init(void);
 void can_rx_task(void *argument);
 void can_tx_task(void *argument);
 void led_task(void *argument);
+void steering_task_pwm(void *argument);
+void PeriodicTimerCallback(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -123,7 +147,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 		  HAL_GPIO_TogglePin(GPIOA, DEBUG_2_Pin);
 	  osDelay(50);
 }
-
 
 /* USER CODE END 0 */
 
@@ -167,7 +190,7 @@ int main(void)
   //HAL_GPIO_WritePin(GPIOA, DEBUG_2_Pin|DEBUG_1_Pin, GPIO_PIN_SET);
 
   // Stepper 1
-  //HAL_GPIO_WritePin(LVL_SFTR_OE_1_GPIO_Port, LVL_SFTR_OE_1_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(LVL_SFTR_OE_1_GPIO_Port, LVL_SFTR_OE_1_Pin, GPIO_PIN_SET);
   //HAL_GPIO_WritePin(GPIOC, STPR_DIR_1_Pin | STPR_EN_1_Pin, GPIO_PIN_SET);
   //HAL_GPIO_WritePin(STPR_PWM_1_GPIO_Port, STPR_PWM_1_Pin, GPIO_PIN_RESET);
 
@@ -185,6 +208,10 @@ int main(void)
   }
 
 */
+
+  TIM1->CCR1 = 50;
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+
   if(HAL_CAN_Start(&hcan1) == HAL_OK)
 	  printf("CAN started correctly\n");
   else
@@ -209,6 +236,10 @@ int main(void)
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
+  /* Create the timer(s) */
+  /* creation of periodicTimer */
+  periodicTimerHandle = osTimerNew(PeriodicTimerCallback, osTimerPeriodic, NULL, &periodicTimer_attributes);
+
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
@@ -219,13 +250,16 @@ int main(void)
 
   /* Create the thread(s) */
   /* creation of canRxTask */
-  //canRxTaskHandle = osThreadNew(can_rx_task, NULL, &canRxTask_attributes);
+  canRxTaskHandle = osThreadNew(can_rx_task, NULL, &canRxTask_attributes);
 
   /* creation of canTxTask */
   canTxTaskHandle = osThreadNew(can_tx_task, NULL, &canTxTask_attributes);
 
   /* creation of ledTask */
   ledTaskHandle = osThreadNew(led_task, NULL, &ledTask_attributes);
+
+  /* creation of steeringTaskPWM */
+  steeringTaskPWMHandle = osThreadNew(steering_task_pwm, NULL, &steeringTaskPWM_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -578,14 +612,15 @@ static void MX_TIM2_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 80-1;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
+  htim2.Init.Period = 100-1 ;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -597,15 +632,32 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM2_Init 2 */
 
   /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -665,10 +717,10 @@ static void MX_GPIO_Init(void)
                           |STPR_EN_1_Pin|STPR_DIR_1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, DEBUG_2_Pin|DEBUG_1_Pin|STPR_PWM_1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, DEBUG_2_Pin|DEBUG_1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LVL_SFTR_OE_2_Pin|STPR_DIR_2_Pin|STPR_EN_2_Pin|STPR_PWM_2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LVL_SFTR_OE_2_Pin|STPR_DIR_2_Pin|STPR_EN_2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LVL_SFTR_OE_1_GPIO_Port, LVL_SFTR_OE_1_Pin, GPIO_PIN_RESET);
@@ -682,15 +734,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : DEBUG_2_Pin DEBUG_1_Pin STPR_PWM_1_Pin */
-  GPIO_InitStruct.Pin = DEBUG_2_Pin|DEBUG_1_Pin|STPR_PWM_1_Pin;
+  /*Configure GPIO pins : DEBUG_2_Pin DEBUG_1_Pin */
+  GPIO_InitStruct.Pin = DEBUG_2_Pin|DEBUG_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LVL_SFTR_OE_2_Pin STPR_DIR_2_Pin STPR_EN_2_Pin STPR_PWM_2_Pin */
-  GPIO_InitStruct.Pin = LVL_SFTR_OE_2_Pin|STPR_DIR_2_Pin|STPR_EN_2_Pin|STPR_PWM_2_Pin;
+  /*Configure GPIO pins : LVL_SFTR_OE_2_Pin STPR_DIR_2_Pin STPR_EN_2_Pin */
+  GPIO_InitStruct.Pin = LVL_SFTR_OE_2_Pin|STPR_DIR_2_Pin|STPR_EN_2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -802,6 +854,46 @@ void led_task(void *argument)
   }
   osThreadTerminate(NULL);
   /* USER CODE END led_task */
+}
+
+/* USER CODE BEGIN Header_steering_task_pwm */
+/**
+* @brief Function implementing the steeringTaskPWM thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_steering_task_pwm */
+void steering_task_pwm(void *argument)
+{
+  /* USER CODE BEGIN steering_task_pwm */
+  /* Infinite loop */
+  for(;;)
+  {
+		int angle_d = (int) desired_angle_1;
+		dir_1 = abs(angle_d)/angle_d;
+
+		if(fabs(desired_angle_1) > MAX_STEERING)
+			desired_angle_1 = MAX_STEERING;
+
+		desired_angle_1 *= dir_1; // to work only with positive numbers
+		goal_steps_1 = desired_angle_1/STEP_ANGLE;
+
+		HAL_GPIO_WritePin(GPIOC, STPR_DIR_1_Pin | STPR_EN_1_Pin, dir_1);
+
+		if(steps_1 < goal_steps_1)
+			HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+		else
+			HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+  }
+  /* USER CODE END steering_task_pwm */
+}
+
+/* PeriodicTimerCallback function */
+void PeriodicTimerCallback(void *argument)
+{
+  /* USER CODE BEGIN PeriodicTimerCallback */
+	HAL_GPIO_TogglePin(GPIOA, DEBUG_1_Pin);
+  /* USER CODE END PeriodicTimerCallback */
 }
 
 /**
