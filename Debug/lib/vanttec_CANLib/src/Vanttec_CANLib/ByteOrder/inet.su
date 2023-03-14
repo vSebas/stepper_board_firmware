@@ -1,0 +1,4 @@
+../lib/vanttec_CANLib/src/Vanttec_CANLib/ByteOrder/inet.cpp:10:10:uint32_t vanttec_htonl(uint32_t)	16	static
+../lib/vanttec_CANLib/src/Vanttec_CANLib/ByteOrder/inet.cpp:18:10:uint16_t vanttec_htons(uint16_t)	16	static
+../lib/vanttec_CANLib/src/Vanttec_CANLib/ByteOrder/inet.cpp:26:10:uint32_t vanttec_ntohl(uint32_t)	16	static
+../lib/vanttec_CANLib/src/Vanttec_CANLib/ByteOrder/inet.cpp:34:10:uint16_t vanttec_ntohs(uint16_t)	16	static

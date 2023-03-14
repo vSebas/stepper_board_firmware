@@ -22,9 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <math.h>
+#include <CAN/can_tasks.h>
+#include <STEPPER/stepper_tasks.h>
 #include "stdio.h"
-#include "stdlib.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,20 +51,6 @@ TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 
-/* Definitions for canRxTask */
-osThreadId_t canRxTaskHandle;
-const osThreadAttr_t canRxTask_attributes = {
-  .name = "canRxTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal,
-};
-/* Definitions for canTxTask */
-osThreadId_t canTxTaskHandle;
-const osThreadAttr_t canTxTask_attributes = {
-  .name = "canTxTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
-};
 /* Definitions for ledTask */
 osThreadId_t ledTaskHandle;
 const osThreadAttr_t ledTask_attributes = {
@@ -90,15 +76,6 @@ const osSemaphoreAttr_t canRxSem_attributes = {
   .name = "canRxSem"
 };
 /* USER CODE BEGIN PV */
-const float MAX_STEERING = 57.3; // Degrees
-const float STEP_ANGLE = 1.8; // Degrees
-const float STEPS_REV = 200;  // Steps per revolution
-int dir_1 = 1;				 //
-int goal_steps_1 = 0;		 // Required steps to reach desired angle
-int steps_1 = 0;			  // Steps of motor 1
-int current_step_1 = 0;
-float desired_angle_1 = 45; // Degrees
-float current_angle_1 = 0; // Degrees
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -109,10 +86,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_CAN1_Init(void);
-void can_rx_task(void *argument);
-void can_tx_task(void *argument);
 void led_task(void *argument);
-void steering_task_pwm(void *argument);
 void PeriodicTimerCallback(void *argument);
 
 /* USER CODE BEGIN PFP */
@@ -130,23 +104,7 @@ int _write(int file, char *ptr, int len)
 	return len;
 }
 
-uint8_t TxData[8];
-uint8_t RxData[8];
-uint32_t TxMailbox;
-uint32_t FreeMailBoxes;
-
-CAN_RxHeaderTypeDef RxHeader;
-CAN_TxHeaderTypeDef TxHeader;
-
 //uint8_t count = 0;
-
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-{
-	//osSemaphoreRelease(canRxSemHandle);
-	  if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
-		  HAL_GPIO_TogglePin(GPIOA, DEBUG_2_Pin);
-	  osDelay(50);
-}
 
 /* USER CODE END 0 */
 
@@ -212,12 +170,14 @@ int main(void)
   TIM1->CCR1 = 50;
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 
+  /*
   if(HAL_CAN_Start(&hcan1) == HAL_OK)
 	  printf("CAN started correctly\n");
   else
 	  printf("CAN error\n");
 
   HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+   */
 
   /* USER CODE END 2 */
 
@@ -249,11 +209,7 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of canRxTask */
-  canRxTaskHandle = osThreadNew(can_rx_task, NULL, &canRxTask_attributes);
-
-  /* creation of canTxTask */
-  canTxTaskHandle = osThreadNew(can_tx_task, NULL, &canTxTask_attributes);
+  start_can_tasks();
 
   /* creation of ledTask */
   ledTaskHandle = osThreadNew(led_task, NULL, &ledTask_attributes);
@@ -500,19 +456,7 @@ static void MX_CAN1_Init(void)
   }
   /* USER CODE BEGIN CAN1_Init 2 */
 
-  CAN_FilterTypeDef canfilterconfig;
-  canfilterconfig.FilterActivation = CAN_FILTER_ENABLE;
-  canfilterconfig.FilterBank = 0;		// Specify filter bank to use
-  canfilterconfig.FilterFIFOAssignment = CAN_FILTER_FIFO0; //Incoming data is saved here
-  canfilterconfig.FilterIdHigh = 0;
-  canfilterconfig.FilterIdLow = 0;
-  canfilterconfig.FilterMaskIdHigh= 0;
-  canfilterconfig.FilterMaskIdLow = 0;
-  canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
-  canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT;
-  canfilterconfig.SlaveStartFilterBank = 0;
-
-  HAL_CAN_ConfigFilter(&hcan1, &canfilterconfig);
+  can_init();
 
   /* USER CODE END CAN1_Init 2 */
 
@@ -775,67 +719,6 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_can_rx_task */
-/**
-  * @brief  Function implementing the canRxTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_can_rx_task */
-void can_rx_task(void *argument)
-{
-  /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-  for(;;)
-  {
-	  //osThreadSuspend(canRxTaskHandle);
-	  osSemaphoreAcquire(canRxSemHandle, osWaitForever);
-	  if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
-		  HAL_GPIO_TogglePin(GPIOA, DEBUG_2_Pin);
-	  osDelay(50);
-  }
-  //osThreadTerminate(NULL);
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_can_tx_task */
-/**
-* @brief Function implementing the canTxTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_can_tx_task */
-void can_tx_task(void *argument)
-{
-  /* USER CODE BEGIN can_tx_task */
-  /* Infinite loop */
-  for(;;)
-  {
-	  TxHeader.DLC = 1; // Length of data to send in bytes
-		TxHeader.ExtId = 0; // For basic CAN protocol
-		TxHeader.IDE = CAN_ID_STD;
-		TxHeader.RTR = CAN_RTR_DATA; // transfering data of remote frame
-		TxHeader.StdId = 0x600; // ID of this CAN peripheral
-		TxHeader.TransmitGlobalTime = DISABLE;
-
-		TxData[0] = 0x11;
-
-		FreeMailBoxes = HAL_CAN_GetTxMailboxesFreeLevel(&hcan1);
-
-		if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox) == HAL_OK) {
-		  printf("Transmission requested 1\n");
-				  if(!HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox))
-					  printf("Message sent 1\n");
-				  else
-					  printf("Message pending 1\n");
-			  } else
-				  printf("Error 1\n");
-		osDelay(50);
-  }
-  osThreadTerminate(NULL);
-  /* USER CODE END can_tx_task */
-}
-
 /* USER CODE BEGIN Header_led_task */
 /**
 * @brief Function implementing the ledTask thread.
@@ -854,38 +737,6 @@ void led_task(void *argument)
   }
   osThreadTerminate(NULL);
   /* USER CODE END led_task */
-}
-
-/* USER CODE BEGIN Header_steering_task_pwm */
-/**
-* @brief Function implementing the steeringTaskPWM thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_steering_task_pwm */
-void steering_task_pwm(void *argument)
-{
-  /* USER CODE BEGIN steering_task_pwm */
-  /* Infinite loop */
-  for(;;)
-  {
-		int angle_d = (int) desired_angle_1;
-		dir_1 = abs(angle_d)/angle_d;
-
-		if(fabs(desired_angle_1) > MAX_STEERING)
-			desired_angle_1 = MAX_STEERING;
-
-		desired_angle_1 *= dir_1; // to work only with positive numbers
-		goal_steps_1 = desired_angle_1/STEP_ANGLE;
-
-		HAL_GPIO_WritePin(GPIOC, STPR_DIR_1_Pin | STPR_EN_1_Pin, dir_1);
-
-		if(steps_1 < goal_steps_1)
-			HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-		else
-			HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
-  }
-  /* USER CODE END steering_task_pwm */
 }
 
 /* PeriodicTimerCallback function */

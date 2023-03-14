@@ -1,0 +1,7 @@
+../Core/Src/CAN/can_msg_queue.c:14:12:handle_debug_msg_queue	56	static
+../Core/Src/CAN/can_msg_queue.c:37:6:send_can_debug_char	16	static
+../Core/Src/CAN/can_msg_queue.c:47:6:send_can_debug_msg	40	static
+../Core/Src/CAN/can_msg_queue.c:63:6:queue_can_msg_byte	32	static
+../Core/Src/CAN/can_msg_queue.c:69:6:queue_can_msg_long	32	static
+../Core/Src/CAN/can_msg_queue.c:75:6:queue_can_msg_short	32	static
+../Core/Src/CAN/can_msg_queue.c:81:6:queue_can_msg_float	48	static
